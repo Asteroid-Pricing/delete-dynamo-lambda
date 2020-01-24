@@ -3,6 +3,8 @@ import boto3
 from string import Template
 from time import sleep
 
+RETRIES = 20
+
 def get_dynamo():
     try:
         dynamo = boto3.client('dynamodb')
@@ -13,7 +15,7 @@ def get_dynamo():
 def get_table_status(dynamo, table_name):
     try:
         result = dynamo.describe_table(TableName=table_name)
-        status = result.Table.TableStatus
+        status = result['Table']['TableStatus']
         return (True, status, None)
     except dynamo.exceptions.ResourceNotFoundException as e:
         return (True, 'DOESNOTEXIST', None)
@@ -22,13 +24,13 @@ def get_table_status(dynamo, table_name):
         
 def delete_table(dynamo, table_name):
     try:
-        result = dynamo.delete_table(tableName=table_name)
+        result = dynamo.delete_table(TableName=table_name)
         return (True, result, None)
     except Exception as e:
         return (False, None, e)
 
 def wait_on_desired_status(dynamo, table_name, desired_status, max_time, current_time):
-    timeout = 5 * 1000
+    timeout = 5
     while True:
         if current_time > max_time:
             s = Template('wait_on_desired_status, tableName: $tableName never became $desiredStatus, waited $currentTime of $maxTime')
@@ -41,6 +43,7 @@ def wait_on_desired_status(dynamo, table_name, desired_status, max_time, current
         if status == desired_status:
             return (True, status, None)
 
+        print('Status ' + status + ' is not ' + desired_status + '. Trying attempt ' + str(current_time + 1) + ' of ' + str(max_time) + ' in 5 seconds...')
         sleep(timeout)
         current_time = current_time + 1
         continue
@@ -61,7 +64,7 @@ def attempt_delete_table(dynamo, table_name):
             print("delete_table error:", error)
             return (False, None, error)
         
-        ok, _, error = wait_on_desired_status(dynamo, table_name, 'DOESNOTEXIST', 10, 0)
+        ok, _, error = wait_on_desired_status(dynamo, table_name, 'DOESNOTEXIST', RETRIES, 0)
         if ok == False:
             print("wait_on_desired_status error:", error)
             return (False, None, error)
@@ -69,7 +72,7 @@ def attempt_delete_table(dynamo, table_name):
         return (True, None, None)
 
     if status == 'DELETING':
-        ok, _, error = wait_on_desired_status(dynamo, table_name, 'DOESNOTEXIST', 10, 0)
+        ok, _, error = wait_on_desired_status(dynamo, table_name, 'DOESNOTEXIST', RETRIES, 0)
         if ok == False:
             print("wait_on_desired_status error:", error)
             return (False, None, error)
@@ -89,6 +92,7 @@ def handler(event):
     if ok == False:
         raise error
     
+    print("Done! event:", event)
     return event
 
 if __name__ == "__main__":
